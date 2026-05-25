@@ -6,10 +6,11 @@ Leave Tracker column order (Sheet1):
   Comments/Reason
 
 A new row is appended when the leave dates and reason are supplied. Employee
-ID, employee name, and leave type are optional. If the supplied employee name
-matches multiple known employee IDs in the leave tracker, the agent asks for
-the Employee ID before writing the row. The auto-filled columns are:
-  - Leave Status   = "Pending"
+ID, employee name, leave type, and requested status are optional. If the
+supplied employee name matches multiple known employee IDs in the leave
+tracker, the agent asks for the Employee ID before writing the row. The
+auto-filled columns are:
+  - Leave Status   = status requested by the user, otherwise "Pending"
   - Requested On   = today's date (YYYY-MM-DD)
   - Approval Date  = ""  (blank — filled in when HR approves)
 """
@@ -18,11 +19,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime
 
 from openai import OpenAI
 
-from backend.services.sheets_client import append_row, read_all_records
+from backend.services.sheets_client import append_row, read_all_records, update_cell_by_header
 
 LEAVE_HEADERS = [
     "Employee ID",
@@ -44,6 +46,7 @@ USER_FIELDS: list[tuple[str, str]] = [
     ("start_date",    "the **start date**"),
     ("end_date",      "the **end date**"),
     ("reason",        "a brief **reason** for the leave"),
+    ("leave_status",  "the **leave status** (Pending or Approved)"),
 ]
 
 REQUIRED_USER_FIELDS: list[tuple[str, str]] = [
@@ -52,8 +55,7 @@ REQUIRED_USER_FIELDS: list[tuple[str, str]] = [
     ("reason", "a brief **reason** for the leave"),
 ]
 OPTIONAL_DETAILS_TEXT = (
-    "Employee ID, name, and leave type are optional. I'll only ask for "
-    "Employee ID if I need it to distinguish between matching names."
+    "Please share the missing leave details when you can."
 )
 
 
@@ -74,6 +76,7 @@ Return ONLY a JSON object with these keys:
   end_date         (string YYYY-MM-DD; "" if not derivable)
   number_of_days   (integer; 0 if not computable)
   reason           (string; "" if not stated)
+  leave_status     (string — "Pending", "Approved", or "" if not explicitly stated)
 
 Rules:
   - Today's date is {today}. Resolve relative dates ("next week", "Monday", \
@@ -85,6 +88,8 @@ provided a field, return "" (empty string) for it. NEVER use placeholder \
 values like "N/A" or "Vacation" unless the user actually said them.
   - If only one date is given, treat it as both start_date and end_date \
 (number_of_days = 1).
+  - For leave_status, normalize "approve", "approved", or "accepted" to \
+"Approved"; normalize "pending" to "Pending". Leave "" if no status was stated.
   - Output JSON only. No prose, no markdown."""
 
 
@@ -97,7 +102,8 @@ Return ONLY a JSON object with these keys:
 
 Business rules:
   - To log a leave request, start_date, end_date, and reason must be present.
-  - Employee ID, employee name, and leave type are optional.
+  - Employee ID, employee name, leave type, and leave status are optional.
+  - If leave_status is missing when logging, the row will be logged as Pending.
   - Use employee_directory to determine whether employee_name matches more
     than one known Employee ID. Compare names case-insensitively and ignore
     extra whitespace.
@@ -105,12 +111,41 @@ Business rules:
     is missing, action must be "ask" and the message must ask for Employee ID.
   - If any required field is missing, action must be "ask" and the message
     must ask only for the missing required fields.
-  - Whenever asking for missing leave details, explicitly say:
-    "Employee ID, name, and leave type are optional. I'll only ask for
-    Employee ID if I need it to distinguish between matching names."
+  - When asking for missing leave details, do not explain which fields are
+    optional unless the user asks.
+  - When asking for Employee ID because a name matches multiple records, do
+    not mention duplicate-name logic; simply ask for the Employee ID so you can
+    find the right leave request.
   - If action is "log", the message should confirm the Pending leave request
-    using the provided details. Show optional blank fields as "Not provided".
+    unless leave_status is Approved. Show optional blank fields as "Not provided".
+  - Never mention internal sheet row numbers or implementation details.
   - Do not invent or default any missing fields.
+  - Output JSON only. No prose, no markdown."""
+
+
+UPDATE_STATUS_SYSTEM = """You update leave statuses using the provided sheet rows.
+
+Return ONLY a JSON object with these keys:
+
+  action       ("ask" or "update")
+  row_number   (integer sheet row number to update; 0 when asking)
+  new_status   ("Pending" or "Approved"; "" when asking)
+  message      (friendly message to send to the user)
+
+Rules:
+  - Understand the user's request and choose the best matching leave row from
+    sheet_rows.
+  - Use employee name, employee ID, start date, end date, reason, and current
+    status to identify the row.
+  - If the user asks to "approve", "accept", or "mark approved", new_status is
+    "Approved". If the user asks to "mark pending" or "set pending", new_status
+    is "Pending".
+  - If the target row or desired status is unclear, action must be "ask" and
+    the message must ask one concise clarifying question.
+  - If multiple rows could match, action must be "ask" and the message must
+    ask for a differentiating detail such as Employee ID or date.
+  - If action is "update", include the exact sheet row_number from sheet_rows.
+  - The row_number is internal. Never mention sheet row numbers to the user.
   - Output JSON only. No prose, no markdown."""
 
 
@@ -180,6 +215,25 @@ def _compute_days(start: str, end: str) -> int:
         return 0
 
 
+def _clean_user_message(message: str) -> str:
+    """Remove implementation details the user does not need to see."""
+    message = re.sub(r"\s*\(?sheet\s+row\s+\d+\)?", "", message, flags=re.IGNORECASE)
+    message = re.sub(r"\s*\(?row\s+\d+\)?", "", message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"\s*Employee ID, name, leave type, and leave status are optional\.[^\n.]*\.",
+        "",
+        message,
+        flags=re.IGNORECASE,
+    )
+    message = re.sub(
+        r"\s*I'll only ask for Employee ID if I need it to distinguish between matching names\.",
+        "",
+        message,
+        flags=re.IGNORECASE,
+    )
+    return message.strip()
+
+
 def _employee_identity_context() -> list[dict[str, str]]:
     """Return known employee name/ID pairs as context for the LLM."""
     sheet_id = os.environ["LEAVE_SHEET_ID"]
@@ -208,7 +262,7 @@ def _plan_leave_action(data: dict, employee_directory: list[dict[str, str]], day
         "employee_directory": employee_directory,
         "computed_days": days or "",
         "required_fields": ["start_date", "end_date", "reason"],
-        "optional_fields": ["employee_id", "employee_name", "leave_type"],
+        "optional_fields": ["employee_id", "employee_name", "leave_type", "leave_status"],
     }
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     resp = client.chat.completions.create(
@@ -234,7 +288,7 @@ def _plan_leave_action(data: dict, employee_directory: list[dict[str, str]], day
             "Before I can log this leave request, I need the start date, "
             f"end date, and reason.\n\n{OPTIONAL_DETAILS_TEXT}"
         )
-    return {"action": action, "message": message.strip()}
+    return {"action": action, "message": _clean_user_message(message)}
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +321,8 @@ def submit_leave_request(
         return plan["message"]
 
     days_cell = days or ""
+    leave_status = data["leave_status"] or "Pending"
+    approval_date = _today_iso() if leave_status == "Approved" else ""
 
     row = [
         data["employee_id"],
@@ -275,9 +331,9 @@ def submit_leave_request(
         start,
         end,
         days_cell,
-        "Pending",
+        leave_status,
         _today_iso(),  # Requested On
-        "",            # Approval Date (blank)
+        approval_date,
         data["reason"],
     ]
     assert len(row) == len(LEAVE_HEADERS), "row length must match header count"
@@ -287,6 +343,73 @@ def submit_leave_request(
     print(f"[leave] appended row: {row}")
 
     return plan["message"]
+
+
+def update_leave_status(user_text: str) -> str:
+    """Use the LLM to choose a leave row and mark it Pending or Approved."""
+    print(f"[leave] update status: {user_text!r}")
+    sheet_id = os.environ["LEAVE_SHEET_ID"]
+    rows = read_all_records(sheet_id)
+    rows_with_numbers = [
+        {"row_number": i + 2, **row}
+        for i, row in enumerate(rows)
+    ]
+    print(f"[leave] status update context: {len(rows_with_numbers)} row(s)")
+
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    resp = client.chat.completions.create(
+        model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
+        messages=[
+            {"role": "system", "content": UPDATE_STATUS_SYSTEM},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "user_request": user_text,
+                        "sheet_rows": rows_with_numbers,
+                        "today": _today_iso(),
+                    },
+                    default=str,
+                    indent=2,
+                ),
+            },
+        ],
+        response_format={"type": "json_object"},
+    )
+    raw = resp.choices[0].message.content or "{}"
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        plan = {}
+
+    action = plan.get("action")
+    row_number = plan.get("row_number")
+    new_status = plan.get("new_status")
+    message = plan.get("message")
+    if isinstance(row_number, str) and row_number.isdigit():
+        row_number = int(row_number)
+
+    if action != "update":
+        return _clean_user_message(message) if isinstance(message, str) and message.strip() else (
+            "Which leave request should I update? Please share the employee name "
+            "or ID and the leave dates."
+        )
+
+    if new_status not in {"Pending", "Approved"} or not isinstance(row_number, int):
+        return (
+            "I couldn't confidently identify both the leave request and the new "
+            "status. Please share the employee name or ID, leave dates, and "
+            "whether it should be Pending or Approved."
+        )
+
+    update_cell_by_header(sheet_id, row_number, "Leave Status", new_status)
+    approval_date = _today_iso() if new_status == "Approved" else ""
+    update_cell_by_header(sheet_id, row_number, "Approval Date", approval_date)
+    print(f"[leave] updated row {row_number} status to {new_status}")
+
+    return _clean_user_message(message) if isinstance(message, str) and message.strip() else (
+        f"Done — I've updated that leave request to **{new_status}**."
+    )
 
 
 def check_leave(user_text: str) -> str:
@@ -308,7 +431,8 @@ def check_leave(user_text: str) -> str:
         "You answer questions about an employee leave tracker. Use ONLY the "
         "rows provided. Be concise and friendly. If the question is about a "
         "specific employee, filter by name (case-insensitive). If the data "
-        "is missing, say so."
+        "is missing, say so. When asked about approval/status, use the "
+        "`Leave Status` column exactly as the source of truth."
     )
 
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])

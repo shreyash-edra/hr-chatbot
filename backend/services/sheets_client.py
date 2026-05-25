@@ -65,6 +65,22 @@ def read_headers(sheet_id: str, tab: str = DEFAULT_TAB) -> list[str]:
     return _worksheet(sheet_id, tab).row_values(1)
 
 
+def update_cell_by_header(
+    sheet_id: str,
+    row_number: int,
+    header: str,
+    value: Any,
+    tab: str = DEFAULT_TAB,
+) -> None:
+    """Update one cell by 1-based sheet row number and header name."""
+    ws = _worksheet(sheet_id, tab)
+    headers = ws.row_values(1)
+    if header not in headers:
+        raise ValueError(f"Header {header!r} not found in sheet")
+    col_number = headers.index(header) + 1
+    ws.update_cell(row_number, col_number, value)
+
+
 # ---------------------------------------------------------------------------
 # Smoke test — `python -m backend.services.sheets_client`
 # ---------------------------------------------------------------------------

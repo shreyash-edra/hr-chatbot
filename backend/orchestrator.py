@@ -1,8 +1,8 @@
 """Orchestrator — OpenAI tool-calling router for the three HR sub-agents.
 
 Design:
-  - We expose four tools to the model: policy_questions, submit_leave_request,
-    check_leave, submit_feedback.
+  - We expose five tools to the model: policy_questions, submit_leave_request,
+    check_leave, update_leave_status, submit_feedback.
   - The orchestrator's system prompt tells the model to pick exactly one tool
     per user message, or to politely decline if the message is off-topic
     (weather, news, trivia, etc.).
@@ -26,7 +26,7 @@ from typing import Any
 from openai import OpenAI
 
 from backend.agents.feedback import submit_feedback
-from backend.agents.leave import check_leave, submit_leave_request
+from backend.agents.leave import check_leave, submit_leave_request, update_leave_status
 from backend.agents.policy import answer_policy_question
 
 # ---------------------------------------------------------------------------
@@ -92,10 +92,11 @@ TOOLS: list[dict[str, Any]] = [
             "name": "check_leave",
             "description": (
                 "Read existing rows from the Leave Tracker sheet to answer "
-                "questions like 'what leave have I taken?', 'how many days "
-                "has X used?', 'show pending requests'. Use when the user "
-                "wants information ABOUT existing leave records, not when "
-                "they want to submit a new one."
+                "questions like 'what is my leave status?', 'is my leave "
+                "approved?', 'what leave have I taken?', 'how many days has X "
+                "used?', 'show pending requests'. Use when the user wants "
+                "information ABOUT existing leave records or approval status, "
+                "not when they want to submit or update a leave request."
             ),
             "parameters": {
                 "type": "object",
@@ -103,6 +104,30 @@ TOOLS: list[dict[str, Any]] = [
                     "user_text": {
                         "type": "string",
                         "description": "The user's question about leave records.",
+                    }
+                },
+                "required": ["user_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_leave_status",
+            "description": (
+                "Update an existing Leave Tracker row's Leave Status to "
+                "Pending or Approved. Use when the user asks to approve, "
+                "accept, mark approved, mark pending, or change the status of "
+                "an existing leave request. The tool reads the sheet and uses "
+                "the model to identify the correct row or ask for a concise "
+                "clarifying detail if the row/status is ambiguous."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_text": {
+                        "type": "string",
+                        "description": "The user's leave status update request.",
                     }
                 },
                 "required": ["user_text"],
@@ -147,9 +172,10 @@ exactly three things:
 
   1. **Policy questions** — company policies, benefits, vacation rules, \
 holidays, expenses, leave entitlements. Use the `policy_questions` tool.
-  2. **Leave management** — submitting new leave requests OR asking about \
-existing leave records. Use `submit_leave_request` for NEW requests and \
-`check_leave` for questions about existing records.
+  2. **Leave management** — submitting new leave requests, asking about \
+existing leave records/statuses, or updating an existing leave status. Use \
+`submit_leave_request` for NEW requests, `check_leave` for questions about \
+existing records/status, and `update_leave_status` for status changes.
   3. **Feedback collection** — anonymous suggestions, complaints, opinions, \
 or compliments about ANYTHING in the workplace (food, equipment, \
 processes, management, culture, environment, tools, perks, etc.). \
@@ -176,6 +202,10 @@ details have been provided by the user in this conversation:
       1. Employee ID
       2. Employee Name
       3. Leave Type (e.g. Vacation, Sick, Personal, Casual)
+      4. Leave Status (Pending or Approved)
+  - If the user gives a status while logging a new leave request, such as \
+"approved", "approve it", or "pending", include that in the logged row. If \
+no status is given, the leave request is logged as Pending.
   - Employee ID is only required before writing when the supplied employee \
 name is ambiguous and matches multiple known employee IDs in the leave \
 tracker. In that case, the tool will ask the user for Employee ID so the \
@@ -188,6 +218,12 @@ For leave submission intent, always call `submit_leave_request`; the tool \
 will ask for missing required leave dates/reason or ambiguous Employee ID.
   - NEVER invent, default, or guess any of these fields. Never assume an \
 employee ID like "N/A" or a leave type like "Vacation" on the user's behalf.
+
+LEAVE — status read/update rules:
+  - Use `check_leave` when the user asks whether a leave request is Pending \
+or Approved, or asks to show/filter leave records by status.
+  - Use `update_leave_status` when the user asks to approve, accept, mark \
+approved, mark pending, or otherwise change an existing leave request status.
 
 FEEDBACK — content required:
   - **Any opinion or complaint about the workplace is feedback** (food, \
@@ -235,6 +271,8 @@ def _dispatch(name: str, args: dict, history: list[dict]) -> str:
         return submit_leave_request(args.get("user_text", ""), history)
     if name == "check_leave":
         return check_leave(args.get("user_text", ""))
+    if name == "update_leave_status":
+        return update_leave_status(args.get("user_text", ""))
     if name == "submit_feedback":
         return submit_feedback(args.get("feedback_text", ""))
     return f"(internal: unknown tool {name!r})"
