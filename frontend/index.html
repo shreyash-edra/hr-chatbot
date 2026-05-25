@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <title>HR Assistant</title>
+
+  <!-- ───────── Fonts ───────── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- ───────── Tailwind (Play CDN) ───────── -->
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            ink:   { DEFAULT: '#1c1917', soft: '#3b3733', muted: '#6b6258', faint: '#a09689' },
+            ivory: { DEFAULT: '#fbf7ee', deep: '#f3ead7', mist: '#fdfaf3' },
+            // Premium champagne/antique-gold accent — used sparingly.
+            champagne: {
+              50:  '#fdf6e3',
+              100: '#faecc3',
+              200: '#f1d995',
+              300: '#e2c272',
+              400: '#d4b483',
+              500: '#c9a464', // primary accent
+              600: '#a07a3a', // depth
+              700: '#7a5b2a',
+              800: '#4f3c1c',
+            },
+          },
+          boxShadow: {
+            'glass-lg': '0 40px 120px -30px rgba(28,25,23,0.25), inset 0 1px 0 rgba(255,255,255,0.7)',
+            'glass':    '0 12px 40px -12px rgba(28,25,23,0.12)',
+            'gold-glow':'0 0 0 4px rgba(201,164,100,0.16), 0 12px 40px -12px rgba(160,122,58,0.30)',
+            'soft':     '0 1px 2px rgba(28,25,23,0.05)',
+          },
+          animation: {
+            'breathe': 'breathe 6s ease-in-out infinite',
+          },
+          keyframes: {
+            breathe: {
+              '0%,100%': { opacity: '0.5', transform: 'scale(1)' },
+              '50%':     { opacity: '0.85', transform: 'scale(1.06)' },
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- ───────── Module imports for React, framer-motion, lucide-react ───────── -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react":             "https://esm.sh/react@18.3.1",
+        "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+        "react-dom":         "https://esm.sh/react-dom@18.3.1?deps=react@18.3.1",
+        "react-dom/client":  "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+        "framer-motion":     "https://esm.sh/framer-motion@11.11.17?deps=react@18.3.1,react-dom@18.3.1",
+        "lucide-react":      "https://esm.sh/lucide-react@0.453.0?deps=react@18.3.1"
+      }
+    }
+  </script>
+
+  <!-- ───────── Babel standalone (JSX in browser) ───────── -->
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js"></script>
+
+  <style>
+    html, body, #root {
+      height: 100%;
+      background: #fbf7ee;
+    }
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      color: #1c1917;
+      overflow: hidden;
+    }
+
+    /* Custom scrollbar — quiet, champagne accent on hover */
+    .premium-scroll::-webkit-scrollbar { width: 10px; }
+    .premium-scroll::-webkit-scrollbar-track { background: transparent; }
+    .premium-scroll::-webkit-scrollbar-thumb {
+      background: rgba(28, 25, 23, 0.10);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+      transition: background 200ms ease;
+    }
+    .premium-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(201, 164, 100, 0.55);
+      background-clip: padding-box;
+    }
+
+    /* Noise overlay using an inline SVG — barely-there grain */
+    .noise::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0.035;
+      mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.85 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    }
+
+    /* Reduced-motion respect */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 100ms !important;
+      }
+    }
+
+    /* Selection */
+    ::selection { background: rgba(201, 164, 100, 0.32); color: #1c1917; }
+  </style>
+</head>
+
+<body class="noise">
+  <div id="root"></div>
+
+  <!-- ───────── App code (JSX, transformed by Babel as ES module) ───────── -->
+  <script type="text/babel" data-type="module" data-presets="react">
+    import React, {
+      useState, useEffect, useRef, useCallback, useMemo,
+    } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import {
+      motion, AnimatePresence, useMotionValue, useMotionTemplate, useSpring,
+    } from 'framer-motion';
+    import {
+      Sparkles, ArrowUp, BookOpen, CalendarDays, MessageSquareHeart,
+      Plus, Mic, Command, RotateCcw,
+    } from 'lucide-react';
+
+    /* ───────── Tiny rich-text renderer for assistant replies ─────────
+       Backend sends plain text with **bold** and "- " bullets — we
+       render those without pulling a markdown lib. */
+    function renderInline(text, prefix = 'i') {
+      const parts = [];
+      const re = /\*\*(.+?)\*\*/g;
+      let lastEnd = 0;
+      let key = 0;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > lastEnd) parts.push(text.slice(lastEnd, m.index));
+        parts.push(
+          <strong key={`${prefix}-${key++}`} className="font-semibold text-ink">
+            {m[1]}
+          </strong>
+        );
+        lastEnd = m.index + m[0].length;
+      }
+      if (lastEnd < text.length) parts.push(text.slice(lastEnd));
+      return parts;
+    }
+
+    function AssistantContent({ text }) {
+      const blocks = useMemo(() => {
+        const lines = text.split('\n');
+        const out = [];
+        let i = 0;
+        while (i < lines.length) {
+          const trimmed = lines[i].trim();
+          const bullet = trimmed.match(/^[-*•]\s+(.*)$/);
+          const num    = trimmed.match(/^(\d+)\.\s+(.*)$/);
+          if (bullet || num) {
+            const items = [];
+            const ordered = !!num;
+            while (i < lines.length) {
+              const t = lines[i].trim();
+              const b = t.match(/^[-*•]\s+(.*)$/);
+              const n = t.match(/^\d+\.\s+(.*)$/);
+              if (ordered && !n) break;
+              if (!ordered && !b) break;
+              items.push((b ? b[1] : n[1]));
+              i++;
+            }
+            out.push({ type: 'list', ordered, items });
+            continue;
+          }
+          if (trimmed === '') {
+            out.push({ type: 'br' });
+            i++;
+            continue;
+          }
+          out.push({ type: 'p', value: lines[i] });
+          i++;
+        }
+        return out;
+      }, [text]);
+
+      return (
+        <div className="text-[15px] leading-[1.65] text-ink-soft">
+          {blocks.map((b, idx) => {
+            if (b.type === 'br')   return <div key={idx} className="h-2" />;
+            if (b.type === 'list') {
+              const Tag = b.ordered ? 'ol' : 'ul';
+              return (
+                <Tag key={idx} className="my-1.5 space-y-1.5">
+                  {b.items.map((it, j) => (
+                    <li key={j} className="flex gap-2.5">
+                      {b.ordered ? (
+                        <span className="mt-[2px] text-[12.5px] font-semibold text-champagne-600 tabular-nums w-4 flex-shrink-0">
+                          {j + 1}.
+                        </span>
+                      ) : (
+                        <span className="mt-[9px] inline-block w-1 h-1 rounded-full bg-champagne-500 flex-shrink-0" />
+                      )}
+                      <span className="flex-1">{renderInline(it, `l${idx}-${j}`)}</span>
+                    </li>
+                  ))}
+                </Tag>
+              );
+            }
+            return <div key={idx}>{renderInline(b.value, `p${idx}`)}</div>;
+          })}
+        </div>
+      );
+    }
+
+    /* ───────── Ambient cinematic background ───────── */
+    function AmbientBackground() {
+      const orbs = useMemo(() => Array.from({ length: 7 }, (_, i) => ({
+        id: i,
+        size: 3 + Math.random() * 5,
+        left: 5 + Math.random() * 90,
+        top:  5 + Math.random() * 90,
+        duration: 14 + Math.random() * 10,
+        delay: -Math.random() * 14,
+      })), []);
+
+      return (
+        <>
+          {/* Base warm ivory */}
+          <div className="fixed inset-0 -z-50 bg-gradient-to-br from-ivory via-[#f7efde] to-ivory-deep" />
+
+          {/* Soft mesh blobs that drift */}
+          <motion.div
+            aria-hidden
+            className="fixed -top-40 -left-40 w-[60vw] h-[60vw] rounded-full -z-40"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(212,180,131,0.42), rgba(212,180,131,0) 60%)',
+              filter: 'blur(70px)',
+            }}
+            animate={{ x: [0, 80, -30, 0], y: [0, 50, -20, 0] }}
+            transition={{ duration: 28, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            aria-hidden
+            className="fixed -bottom-40 -right-40 w-[60vw] h-[60vw] rounded-full -z-40"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(160,122,58,0.32), rgba(160,122,58,0) 60%)',
+              filter: 'blur(80px)',
+            }}
+            animate={{ x: [0, -60, 30, 0], y: [0, -40, 20, 0] }}
+            transition={{ duration: 34, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            aria-hidden
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[42vw] h-[42vw] rounded-full -z-40"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(255,247,221,0.55), transparent 70%)',
+              filter: 'blur(90px)',
+            }}
+            animate={{ scale: [1, 1.18, 1], opacity: [0.35, 0.6, 0.35] }}
+            transition={{ duration: 14, repeat: Infinity, ease: 'easeInOut' }}
+          />
+
+          {/* Floating gold light orbs */}
+          <div aria-hidden className="fixed inset-0 -z-30 pointer-events-none">
+            {orbs.map((o) => (
+              <motion.span
+                key={o.id}
+                className="absolute rounded-full"
+                style={{
+                  left: o.left + '%',
+                  top:  o.top + '%',
+                  width:  o.size,
+                  height: o.size,
+                  background: 'radial-gradient(circle, #f5d99e, rgba(176,141,87,0))',
+                  boxShadow: '0 0 14px rgba(212,180,131,0.55)',
+                }}
+                animate={{ y: [0, -36, 0], opacity: [0.25, 0.6, 0.25], scale: [1, 1.4, 1] }}
+                transition={{
+                  duration: o.duration,
+                  delay:    o.delay,
+                  repeat:   Infinity,
+                  ease:     'easeInOut',
+                }}
+              />
+            ))}
+          </div>
+        </>
+      );
+    }
+
+    /* ───────── Cursor-aware spotlight inside the chat panel ───────── */
+    function PanelSpotlight() {
+      const x = useMotionValue(50);
+      const y = useMotionValue(50);
+      const sx = useSpring(x, { stiffness: 120, damping: 25 });
+      const sy = useSpring(y, { stiffness: 120, damping: 25 });
+
+      useEffect(() => {
+        const onMove = (e) => {
+          // Find the chat container that owns the spotlight.
+          const panel = document.getElementById('chat-panel');
+          if (!panel) return;
+          const r = panel.getBoundingClientRect();
+          if (e.clientX < r.left || e.clientX > r.right ||
+              e.clientY < r.top  || e.clientY > r.bottom) return;
+          x.set(((e.clientX - r.left) / r.width) * 100);
+          y.set(((e.clientY - r.top)  / r.height) * 100);
+        };
+        window.addEventListener('mousemove', onMove);
+        return () => window.removeEventListener('mousemove', onMove);
+      }, [x, y]);
+
+      const bg = useMotionTemplate`radial-gradient(420px circle at ${sx}% ${sy}%, rgba(212,180,131,0.18), transparent 55%)`;
+
+      return (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[28px] opacity-100"
+          style={{ background: bg }}
+        />
+      );
+    }
+
+    /* ───────── AI Identity avatar (used in header + bubbles) ───────── */
+    function AIAvatar({ size = 'md', floating = false }) {
+      const sizes = {
+        sm: 'w-8  h-8  rounded-xl',
+        md: 'w-11 h-11 rounded-2xl',
+        lg: 'w-16 h-16 rounded-[1.4rem]',
+      };
+      const iconSize = { sm: 'w-3.5 h-3.5', md: 'w-5 h-5', lg: 'w-7 h-7' }[size];
+      return (
+        <motion.div
+          className={`relative ${sizes[size]} grid place-items-center text-white
+            bg-gradient-to-br from-[#e8c98c] via-champagne-500 to-champagne-600
+            shadow-[0_10px_30px_-8px_rgba(160,122,58,0.55),inset_0_1px_0_rgba(255,255,255,0.6),inset_0_-2px_0_rgba(100,75,30,0.25)]`}
+          animate={floating ? { y: [0, -2, 0] } : undefined}
+          transition={floating ? { duration: 4.5, repeat: Infinity, ease: 'easeInOut' } : undefined}
+        >
+          <Sparkles className={iconSize} strokeWidth={2.2} />
+          <span
+            aria-hidden
+            className={`absolute -inset-2 ${sizes[size]} bg-[radial-gradient(circle,rgba(212,180,131,0.55),transparent_70%)] blur-md -z-10 animate-breathe`}
+          />
+        </motion.div>
+      );
+    }
+
+    /* ───────── Header ───────── */
+    function Header({ onReset, showReset }) {
+      return (
+        <header className="relative z-10 px-6 pt-5 pb-4 flex items-center gap-4
+          border-b border-stone-200/60 bg-white/45 backdrop-blur-xl">
+          <AIAvatar size="md" floating />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-[17px] font-semibold tracking-[-0.01em] text-ink leading-none">
+              HR Assistant
+            </h1>
+            <p className="text-[12.5px] text-ink-muted mt-1.5 tracking-[0.005em]">
+              Policies · Leave · Feedback
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <AnimatePresence initial={false}>
+              {showReset && (
+                <motion.button
+                  key="reset"
+                  type="button"
+                  onClick={onReset}
+                  initial={{ opacity: 0, x: 6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 6 }}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  title="Start a new chat"
+                  aria-label="Start a new chat"
+                  className="group inline-flex items-center gap-1.5 pl-2.5 pr-3 py-1.5 rounded-full
+                    bg-white/65 backdrop-blur border border-stone-200/70
+                    text-[12px] font-medium text-ink-soft
+                    hover:border-champagne-500/45 hover:text-champagne-700
+                    hover:shadow-[0_6px_18px_-8px_rgba(160,122,58,0.35)]
+                    transition-all duration-200"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 transition-transform duration-300 group-hover:-rotate-90"
+                    strokeWidth={2.2} />
+                  <span className="hidden sm:inline">New chat</span>
+                </motion.button>
+              )}
+            </AnimatePresence>
+            <StatusPill />
+          </div>
+        </header>
+      );
+    }
+
+    function StatusPill() {
+      return (
+        <div className="inline-flex items-center gap-2 pl-2.5 pr-3 py-1.5 rounded-full
+          bg-white/65 backdrop-blur border border-stone-200/70 text-[11px]
+          font-semibold uppercase tracking-[0.08em] text-ink-soft">
+          <span className="relative inline-flex w-2 h-2">
+            <motion.span
+              aria-hidden
+              className="absolute inset-0 rounded-full bg-emerald-500"
+              animate={{ opacity: [0.4, 0, 0.4], scale: [0.8, 1.8, 0.8] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+              style={{ filter: 'blur(2px)' }}
+            />
+            <span className="relative w-2 h-2 rounded-full bg-emerald-500" />
+          </span>
+          Online
+        </div>
+      );
+    }
+
+    /* ───────── Suggestion action cards (empty-state) ───────── */
+    const SUGGESTIONS = [
+      {
+        id: 'policy',
+        icon: BookOpen,
+        title: 'Ask about a policy',
+        sub:   'Vacation rules, holidays, benefits',
+        prompt: 'How many vacation days do I get?',
+      },
+      {
+        id: 'leave',
+        icon: CalendarDays,
+        title: 'Submit a leave request',
+        sub:   'Logs a request to your HR sheet',
+        prompt: "I'd like to submit a leave request",
+      },
+      {
+        id: 'feedback',
+        icon: MessageSquareHeart,
+        title: 'Share anonymous feedback',
+        sub:   'Captured privately — no name attached',
+        prompt: 'I have some feedback to share',
+      },
+    ];
+
+    function SuggestionCard({ s, i, onPick }) {
+      return (
+        <motion.button
+          type="button"
+          onClick={() => onPick(s.prompt)}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 + i * 0.07, type: 'spring', stiffness: 200, damping: 22 }}
+          whileHover={{ y: -3 }}
+          whileTap={{ scale: 0.985 }}
+          className="group relative overflow-hidden rounded-2xl text-left
+            bg-white/65 backdrop-blur-md border border-stone-200/70
+            hover:border-champagne-500/45 transition-colors
+            shadow-soft hover:shadow-[0_18px_40px_-18px_rgba(160,122,58,0.40)]
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-champagne-500/40"
+        >
+          {/* gradient border accent on hover */}
+          <span
+            aria-hidden
+            className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+            style={{
+              background:
+                'linear-gradient(135deg, rgba(212,180,131,0.0) 0%, rgba(212,180,131,0.18) 50%, rgba(160,122,58,0.06) 100%)',
+            }}
+          />
+          <div className="relative p-4">
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-7 h-7 rounded-lg grid place-items-center text-champagne-700
+                bg-gradient-to-br from-champagne-50 to-champagne-200
+                shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] border border-champagne-200/70">
+                <s.icon className="w-3.5 h-3.5" strokeWidth={2.3} />
+              </div>
+              <span className="text-[13.5px] font-semibold text-ink tracking-tight">
+                {s.title}
+              </span>
+            </div>
+            <div className="text-[12.5px] text-ink-muted leading-snug">
+              {s.sub}
+            </div>
+          </div>
+          {/* hover shine sweep */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-0 -left-1/3 w-1/3 h-full
+              bg-gradient-to-r from-transparent via-white/40 to-transparent rotate-12
+              translate-x-[-150%] group-hover:translate-x-[700%]
+              transition-transform duration-[1200ms] ease-out"
+          />
+        </motion.button>
+      );
+    }
+
+    /* ───────── Empty state ───────── */
+    function EmptyState({ onPick }) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center px-6 py-8 text-center">
+          <AIAvatar size="lg" floating />
+          <motion.h2
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="mt-6 text-[26px] sm:text-[28px] font-semibold tracking-[-0.02em] text-ink"
+          >
+            How can I help today?
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.14 }}
+            className="mt-2 text-[14.5px] text-ink-muted max-w-md leading-relaxed"
+          >
+            I can answer policy questions, log a leave request, or capture
+            anonymous feedback. Pick a starting point or type below.
+          </motion.p>
+
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl">
+            {SUGGESTIONS.map((s, i) => (
+              <SuggestionCard key={s.id} s={s} i={i} onPick={onPick} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    /* ───────── Messages ───────── */
+    function MessageRow({ role, text }) {
+      const isUser = role === 'user';
+      return (
+        <motion.div
+          layout
+          initial={{ opacity: 0, y: 10, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0,  scale: 1 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ type: 'spring', stiffness: 220, damping: 26 }}
+          className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
+        >
+          {!isUser && (
+            <div className="flex-shrink-0 mt-0.5">
+              <AIAvatar size="sm" />
+            </div>
+          )}
+          <div
+            className={[
+              'relative max-w-[80%] px-4 py-3 text-[15px] leading-[1.65]',
+              isUser
+                // user: warm graphite — keeps gold rare/intentional
+                ? 'rounded-2xl rounded-br-md bg-gradient-to-br from-[#2a2520] to-[#1c1917] text-stone-100 shadow-[0_10px_24px_-10px_rgba(28,25,23,0.45),inset_0_1px_0_rgba(255,255,255,0.08)] ring-1 ring-inset ring-white/8'
+                : 'rounded-2xl rounded-bl-md bg-white/85 backdrop-blur-md text-ink-soft border border-stone-200/60 shadow-glass',
+            ].join(' ')}
+          >
+            {isUser
+              ? <div className="whitespace-pre-wrap break-words">{text}</div>
+              : <AssistantContent text={text} />
+            }
+          </div>
+        </motion.div>
+      );
+    }
+
+    function TypingRow() {
+      return (
+        <motion.div
+          layout
+          key="typing"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.2 }}
+          className="flex gap-3 justify-start"
+        >
+          <div className="flex-shrink-0 mt-0.5">
+            <AIAvatar size="sm" />
+          </div>
+          <div className="rounded-2xl rounded-bl-md bg-white/85 backdrop-blur-md
+              border border-stone-200/60 shadow-glass px-4 py-3 flex items-center gap-1.5">
+            {[0, 1, 2].map((i) => (
+              <motion.span
+                key={i}
+                className="w-[7px] h-[7px] rounded-full bg-gradient-to-br from-champagne-300 to-champagne-600"
+                animate={{ y: [0, -5, 0], opacity: [0.35, 1, 0.35] }}
+                transition={{
+                  duration: 1.1,
+                  delay: i * 0.13,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                }}
+              />
+            ))}
+          </div>
+        </motion.div>
+      );
+    }
+
+    /* ───────── Composer ───────── */
+    /* ───── Composer footer ─────
+       Edge-to-edge "command bar" that mirrors the Header. No card, no
+       rounded corners. Sharp geometric elements, gold focus line that
+       reveals along the top edge when the textarea is active. */
+    function FauxIconButton({ icon: Icon, label }) {
+      return (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={label}
+          className="w-9 h-9 grid place-items-center text-ink-faint
+            hover:text-ink-soft hover:bg-stone-100/70
+            transition-colors duration-150 focus:outline-none"
+        >
+          <Icon className="w-[18px] h-[18px]" strokeWidth={2} />
+        </button>
+      );
+    }
+
+    function Composer({ value, setValue, onSend, busy }) {
+      const ref = useRef(null);
+      useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+      }, [value]);
+
+      const canSend = !busy && value.trim().length > 0;
+
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25, type: 'spring', stiffness: 180, damping: 24 }}
+          className="group relative bg-white/55 backdrop-blur-xl
+            border-t border-stone-200/60
+            focus-within:bg-white/70 transition-colors duration-200"
+        >
+          {/* Gold focus line revealing along the top edge */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 h-[1.5px]
+              opacity-0 group-focus-within:opacity-100
+              transition-opacity duration-300"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent 6%, rgba(201,164,100,0.85) 50%, transparent 94%)',
+              boxShadow: '0 0 12px rgba(201,164,100,0.35)',
+            }}
+          />
+
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (canSend) onSend(value); }}
+          >
+            {/* Textarea zone — generous breathing room */}
+            <textarea
+              ref={ref}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) onSend(value);
+                }
+              }}
+              rows={1}
+              disabled={busy}
+              placeholder="Ask anything about HR…"
+              aria-label="Message"
+              className="block w-full resize-none bg-transparent outline-none
+                text-[15px] text-ink placeholder:text-ink-faint
+                px-6 pt-5 pb-4 leading-relaxed"
+            />
+
+            {/* Hairline divider, fades at edges */}
+            <div
+              aria-hidden
+              className="h-px bg-gradient-to-r from-transparent via-stone-200/70 to-transparent"
+            />
+
+            {/* Action row */}
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <div className="flex items-center gap-1">
+                <FauxIconButton icon={Plus} label="Attach" />
+                <FauxIconButton icon={Mic}  label="Voice" />
+              </div>
+
+              <div className="flex items-center gap-3">
+                <kbd
+                  className="hidden sm:inline-flex items-center gap-1
+                    text-[10.5px] font-medium text-ink-faint
+                    bg-stone-100/70 border border-stone-200/70
+                    px-1.5 py-[3px] tracking-wide"
+                >
+                  <Command className="w-3 h-3" />↵
+                </kbd>
+
+                <motion.button
+                  type="submit"
+                  disabled={!canSend}
+                  whileHover={canSend ? { y: -1 } : undefined}
+                  whileTap={canSend ? { scale: 0.96 } : undefined}
+                  aria-label="Send"
+                  className={[
+                    'relative grid place-items-center w-10 h-10 overflow-hidden transition-all duration-200',
+                    canSend
+                      ? 'bg-gradient-to-br from-champagne-400 via-champagne-500 to-champagne-600 text-[#2a1f0d] shadow-[0_8px_22px_-6px_rgba(160,122,58,0.55),inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_0_rgba(100,75,30,0.28)]'
+                      : 'bg-stone-100 text-ink-faint cursor-not-allowed',
+                  ].join(' ')}
+                >
+                  <ArrowUp className="w-4 h-4 relative z-10" strokeWidth={2.5} />
+                  {canSend && (
+                    <motion.span
+                      aria-hidden
+                      className="absolute inset-0 -translate-x-full"
+                      style={{
+                        background:
+                          'linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%)',
+                      }}
+                      animate={{ x: ['-100%', '180%'] }}
+                      transition={{ duration: 2.4, repeat: Infinity, ease: 'linear', repeatDelay: 1.4 }}
+                    />
+                  )}
+                </motion.button>
+              </div>
+            </div>
+
+            {/* Footer caption */}
+            <p className="px-6 pb-3.5 text-center text-[10.5px] text-ink-faint tracking-[0.06em]">
+              Feedback is recorded <span className="text-champagne-600 font-medium">anonymously</span>
+              <span className="mx-1.5 text-ink-faint/60">·</span>
+              Conversations end with this session
+            </p>
+          </form>
+        </motion.div>
+      );
+    }
+
+    /* ───────── App shell ───────── */
+    const newSessionId = () =>
+      (crypto.randomUUID && crypto.randomUUID()) ||
+      ('s_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+
+    function App() {
+      const [messages, setMessages] = useState([]);
+      const [input,    setInput]    = useState('');
+      const [busy,     setBusy]     = useState(false);
+
+      const sessionIdRef = useRef(newSessionId());
+      const abortRef     = useRef(null);
+      const scrollEndRef = useRef(null);
+
+      useEffect(() => {
+        scrollEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, [messages, busy]);
+
+      const send = useCallback(async (raw) => {
+        const text = (raw || '').trim();
+        if (!text || busy) return;
+
+        setMessages((m) => [...m, { id: Date.now() + Math.random(), role: 'user', text }]);
+        setInput('');
+        setBusy(true);
+
+        // Abort any prior in-flight (shouldn't happen — busy gate — but defensive).
+        if (abortRef.current) abortRef.current.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
+        const sentSession = sessionIdRef.current;
+
+        try {
+          const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, session_id: sentSession }),
+            signal: controller.signal,
+          });
+
+          // If the user reset mid-flight, drop the result entirely.
+          if (sentSession !== sessionIdRef.current) return;
+
+          if (!res.ok) {
+            let detail = '';
+            try { detail = (await res.json()).detail || ''; } catch (_) {}
+            setMessages((m) => [...m, {
+              id: Date.now() + Math.random(),
+              role: 'assistant',
+              text: 'Sorry — something went wrong on the server' +
+                (detail ? ': ' + detail : '') + '.',
+            }]);
+          } else {
+            const data = await res.json();
+            setMessages((m) => [...m, {
+              id: Date.now() + Math.random(),
+              role: 'assistant',
+              text: data.reply || '(no reply)',
+            }]);
+          }
+        } catch (err) {
+          if (err.name === 'AbortError') return;  // user reset — silent
+          if (sentSession !== sessionIdRef.current) return;
+          setMessages((m) => [...m, {
+            id: Date.now() + Math.random(),
+            role: 'assistant',
+            text: "I couldn’t reach the server. Is it running on port 8000?",
+          }]);
+        } finally {
+          if (abortRef.current === controller) abortRef.current = null;
+          // Only clear busy if this request still belongs to the current session.
+          if (sentSession === sessionIdRef.current) setBusy(false);
+        }
+      }, [busy]);
+
+      const reset = useCallback(() => {
+        // Cancel in-flight, wipe UI, regenerate session so backend forgets too.
+        if (abortRef.current) abortRef.current.abort();
+        abortRef.current = null;
+        sessionIdRef.current = newSessionId();
+        setMessages([]);
+        setInput('');
+        setBusy(false);
+      }, []);
+
+      const isEmpty = messages.length === 0;
+
+      return (
+        <>
+          <AmbientBackground />
+
+          <div className="relative z-10 h-dvh flex items-center justify-center p-0 sm:p-6">
+            <motion.main
+              id="chat-panel"
+              initial={{ opacity: 0, y: 14, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0,  scale: 1 }}
+              transition={{ type: 'spring', stiffness: 160, damping: 24, mass: 0.6 }}
+              className="relative w-full max-w-3xl h-dvh sm:h-[min(92dvh,920px)]
+                flex flex-col overflow-hidden
+                rounded-none sm:rounded-[28px]
+                bg-white/55 backdrop-blur-xl
+                border border-white/70
+                shadow-none sm:shadow-glass-lg"
+            >
+              {/* Cursor-aware ambient highlight inside the panel */}
+              <PanelSpotlight />
+
+              <Header onReset={reset} showReset={!isEmpty} />
+
+              {/* Scrolling content */}
+              <div className="flex-1 overflow-y-auto premium-scroll relative">
+                <AnimatePresence initial={false} mode="popLayout">
+                  {isEmpty ? (
+                    <motion.div
+                      key="empty"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="h-full"
+                    >
+                      <EmptyState onPick={send} />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="thread"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="px-5 sm:px-6 py-6 space-y-4"
+                    >
+                      <AnimatePresence initial={false} mode="popLayout">
+                        {messages.map((m) => (
+                          <MessageRow key={m.id} role={m.role} text={m.text} />
+                        ))}
+                        {busy && <TypingRow />}
+                      </AnimatePresence>
+                      <div ref={scrollEndRef} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <Composer
+                value={input}
+                setValue={setInput}
+                onSend={send}
+                busy={busy}
+              />
+            </motion.main>
+          </div>
+        </>
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
