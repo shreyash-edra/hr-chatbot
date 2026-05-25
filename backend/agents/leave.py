@@ -149,6 +149,26 @@ Rules:
   - Output JSON only. No prose, no markdown."""
 
 
+LEAVE_ROUTER_SYSTEM = """You route leave-management messages to the right leave capability.
+
+Return ONLY a JSON object with these keys:
+
+  action ("submit", "check", or "update_status")
+  user_text (string)
+
+Routing rules:
+  - Use "submit" when the employee wants to create/log/request/take leave.
+  - Use "check" when the user asks about existing leave records, balances,
+    dates, pending/approved status, or asks to show/filter leave records.
+  - Use "update_status" when the user asks to approve, accept, mark approved,
+    mark pending, or otherwise change an existing leave request's status.
+  - Use the conversation history to resolve follow-ups like "mark it approved"
+    or "yes".
+  - user_text should include the latest request plus any needed context from
+    the conversation so the selected leave capability can act correctly.
+  - Output JSON only. No prose, no markdown."""
+
+
 def _today_iso() -> str:
     return date.today().isoformat()
 
@@ -164,6 +184,40 @@ def _history_to_text(history: list[dict] | None) -> str:
         role = "USER" if m["role"] == "user" else "ASSISTANT"
         lines.append(f"{role}: {m['content']}")
     return "\n".join(lines)
+
+
+def _route_leave_action(user_text: str, history: list[dict] | None = None) -> dict:
+    """Let the leave agent choose which leave capability should handle this."""
+    history_text = _history_to_text(history)
+    input_block = (
+        f"Conversation so far:\n{history_text}\n\n"
+        f"Latest user message: {user_text!r}"
+        if history_text
+        else user_text
+    )
+
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    resp = client.chat.completions.create(
+        model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
+        messages=[
+            {"role": "system", "content": LEAVE_ROUTER_SYSTEM},
+            {"role": "user", "content": input_block},
+        ],
+        response_format={"type": "json_object"},
+    )
+    raw = resp.choices[0].message.content or "{}"
+    try:
+        route = json.loads(raw)
+    except json.JSONDecodeError:
+        route = {}
+
+    action = route.get("action")
+    routed_text = route.get("user_text")
+    if action not in {"submit", "check", "update_status"}:
+        action = "check"
+    if not isinstance(routed_text, str) or not routed_text.strip():
+        routed_text = user_text
+    return {"action": action, "user_text": routed_text.strip()}
 
 
 def _extract_request(user_text: str, history: list[dict] | None = None) -> dict:
@@ -410,6 +464,22 @@ def update_leave_status(user_text: str) -> str:
     return _clean_user_message(message) if isinstance(message, str) and message.strip() else (
         f"Done — I've updated that leave request to **{new_status}**."
     )
+
+
+def handle_leave_message(
+    user_text: str,
+    history: list[dict] | None = None,
+) -> str:
+    """Route leave-related chat to submit/check/update inside the leave agent."""
+    print(f"[leave] handle message: {user_text!r}")
+    route = _route_leave_action(user_text, history)
+    print(f"[leave] route: {route}")
+
+    if route["action"] == "submit":
+        return submit_leave_request(route["user_text"], history)
+    if route["action"] == "update_status":
+        return update_leave_status(route["user_text"])
+    return check_leave(route["user_text"])
 
 
 def check_leave(user_text: str) -> str:
