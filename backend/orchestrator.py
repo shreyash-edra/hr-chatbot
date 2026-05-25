@@ -63,13 +63,12 @@ TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Try to log a NEW leave/time-off request to the Leave Tracker. "
                 "Call this whenever the user is asking to TAKE leave. The "
-                "tool will inspect the full conversation history; if any of "
-                "the six required fields are still missing (Employee ID, "
-                "Employee Name, Leave Type, Start Date, End Date, Reason), "
-                "the tool will return a message asking the user for the "
-                "missing ones WITHOUT writing to the sheet. It only logs a "
-                "row when every required field has been provided. NEVER "
-                "fabricate fields the user hasn't given — let the tool ask."
+                "tool will inspect the full conversation history. It requires "
+                "start date, end date, and reason before logging. Employee ID, "
+                "name, and leave type are optional, except the tool will ask "
+                "for Employee ID when the supplied name is ambiguous and "
+                "matches multiple known employee IDs. NEVER fabricate fields "
+                "the user hasn't given."
             ),
             "parameters": {
                 "type": "object",
@@ -167,23 +166,28 @@ Combine them into ONE friendly reply, summarising what was logged (or \
 what's still needed) for each intent. Do not call one tool, wait, and \
 then call another in a separate turn — issue all calls together.
 
-LEAVE — strict completeness rules:
-  - A leave request can ONLY be written to the sheet when ALL six of these \
-have been provided by the user in this conversation:
+LEAVE — logging rules:
+  - A leave request can only be written to the sheet when these three \
+details have been provided by the user in this conversation:
+      1. Start Date
+      2. End Date
+      3. Reason for the leave
+  - These details are optional for logging:
       1. Employee ID
-      2. Employee Name (full name)
+      2. Employee Name
       3. Leave Type (e.g. Vacation, Sick, Personal, Casual)
-      4. Start Date
-      5. End Date
-      6. Reason for the leave
+  - Employee ID is only required before writing when the supplied employee \
+name is ambiguous and matches multiple known employee IDs in the leave \
+tracker. In that case, the tool will ask the user for Employee ID so the \
+entry can be differentiated.
   - When the user mentions wanting leave, call `submit_leave_request` with \
 their LATEST message — the tool reads conversation history itself and will \
-return a friendly prompt asking for any missing fields WITHOUT writing a \
-row. Keep calling it as the user provides more info; it only writes when \
-all six fields are complete.
+either log the request or ask for Employee ID if the name is ambiguous.
+  - Do not ask the user for missing leave details before calling the tool. \
+For leave submission intent, always call `submit_leave_request`; the tool \
+will ask for missing required leave dates/reason or ambiguous Employee ID.
   - NEVER invent, default, or guess any of these fields. Never assume an \
-employee ID like "N/A" or a leave type like "Vacation" on the user's behalf. \
-If a field hasn't been stated by the user, it is missing.
+employee ID like "N/A" or a leave type like "Vacation" on the user's behalf.
 
 FEEDBACK — content required:
   - **Any opinion or complaint about the workplace is feedback** (food, \
@@ -202,8 +206,9 @@ Other rules:
 weather, news, sports, trivia, general chit-chat, coding help, math \
 problems. In those cases reply that you can only help with HR policies, \
 leave, and feedback.
-  - For ambiguous messages, use conversation history to disambiguate. If \
-still unclear, ask ONE short clarifying question before tool-calling.
+  - For ambiguous non-leave messages, use conversation history to \
+disambiguate. If still unclear, ask ONE short clarifying question before \
+tool-calling.
   - For greetings ("hi", "hello"), reply warmly and briefly suggest the \
 three things you can help with — do not call any tool.
   - If the user asks the current date, day, or time, answer directly using \
